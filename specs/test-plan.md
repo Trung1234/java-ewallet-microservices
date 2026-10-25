@@ -1,85 +1,106 @@
-# Test Plan — PayNest MVP
+# Test Plan — PayNest
 
-Maps to rules and features in [product-spec.md](product-spec.md).
+Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*) and the weekly exits in [implementation-plan.md](implementation-plan.md).
 
 ## Strategy
 
-- **Integration tests first**: Spring Boot test + Testcontainers PostgreSQL, calling the real HTTP API. Most behaviour is DB-dependent (constraints, locking), so mocking the DB is avoided.
-- **Unit tests** only for small pure logic (validation, amount rules).
-- **Manual check** for the frontend (MVP).
-- Every business rule R1–R9 has at least one test.
+- **Integration tests with Testcontainers** (PostgreSQL, MongoDB, Kafka, Redis) are the main tool; constraints, locking and messaging are real, not mocked.
+- **Unit tests** only for pure logic (state machine, validation).
+- **Load/concurrency tests** with k6 or Gatling in `load-test/`.
+- **Failure drills** (Kafka down, bank flaky) are scripted and documented.
+- Each invariant INV-1 to INV-6 has at least one test.
 
-## Test cases
-
-### Auth (F1, F2, R9)
-
-| ID | Case | Expected |
-|---|---|---|
-| T-AUTH-1 | Register with valid email/password | 201, user + wallet (balance 0) created |
-| T-AUTH-2 | Register with existing email (different case) | 409 `EMAIL_TAKEN` |
-| T-AUTH-3 | Register with password < 8 chars or bad email | 400 `VALIDATION_ERROR` |
-| T-AUTH-4 | Password stored hashed | DB value is not the plain password |
-| T-AUTH-5 | Login with correct credentials | 200 + JWT |
-| T-AUTH-6 | Login with wrong password | 401 `INVALID_CREDENTIALS` |
-| T-AUTH-7 | Call protected endpoint without / with bad token | 401 `UNAUTHORIZED` |
-
-### Wallet and top-up (F3, F4, R1, R2, R8)
+## Week 1 — User and Wallet
 
 | ID | Case | Expected |
 |---|---|---|
-| T-WAL-1 | Get wallet after register | Balance 0 |
-| T-WAL-2 | Top up 100,000 | Balance 100,000; TOPUP transaction recorded |
-| T-WAL-3 | Top up 0, negative, or non-integer | 400 `VALIDATION_ERROR` |
-| T-WAL-4 | Top up above 10,000,000 | 400 `VALIDATION_ERROR` |
-| T-WAL-5 | Direct DB update to negative balance | Rejected by check constraint |
+| T-USR-1 | Register with valid data | User stored in MongoDB, password hashed |
+| T-USR-2 | Register with duplicate email | Rejected (409) |
+| T-USR-3 | Login correct / wrong password | JWT returned / 401 |
+| T-USR-4 | KYC status default and update | PENDING by default; changes persist |
+| T-WAL-1 | Wallet exists with balance 0 for new user | OK |
+| T-WAL-2 | Top-up adds amount | Balance increases; transaction recorded |
+| T-WAL-3 | Withdraw within balance | Balance decreases |
+| T-WAL-4 | Withdraw more than balance | Rejected; balance unchanged (INV-1) |
+| T-WAL-5 | Amount 0 or negative | 400 validation error |
+| T-WAL-6 | Protected endpoint without/with bad JWT | 401 |
+| T-WAL-7 | Direct DB update to negative balance | Blocked by check constraint |
+| T-WAL-8 | Two concurrent updates on one wallet | Optimistic lock conflict handled; no lost update |
 
-### Transfer (F5, R1–R6)
-
-| ID | Case | Expected |
-|---|---|---|
-| T-TRF-1 | A (500) sends 200 to B (0) | A=300, B=200; one TRANSFER transaction |
-| T-TRF-2 | Send more than balance | 422 `INSUFFICIENT_FUNDS`; balances unchanged |
-| T-TRF-3 | Send exact full balance | Succeeds; sender balance 0 |
-| T-TRF-4 | Send to own email | 400 `SELF_TRANSFER` |
-| T-TRF-5 | Send to unknown email | 404 `RECIPIENT_NOT_FOUND` |
-| T-TRF-6 | Amount 0 / negative | 400 `VALIDATION_ERROR` |
-| T-TRF-7 | Failure after debit (simulated exception) | Whole transfer rolled back (R5) |
-| T-TRF-8 | Money conservation | Sum of all balances equals sum of top-ups after any sequence of transfers (R6) |
-
-### Idempotency (R7)
+## Week 2 — Transfer and Ledger
 
 | ID | Case | Expected |
 |---|---|---|
-| T-IDM-1 | Same key sent twice | One transfer; second call returns the same result; balances changed once |
-| T-IDM-2 | Same key sent concurrently (10 requests) | Exactly one transfer created |
-| T-IDM-3 | Different keys, same payload | Two separate transfers |
-| T-IDM-4 | Missing `Idempotency-Key` header | 400 `VALIDATION_ERROR` |
+| T-TRF-1 | A sends to B with enough balance | 202 + id; ends COMPLETED; balances correct |
+| T-TRF-2 | Insufficient funds | Ends FAILED; no balance change (INV-1) |
+| T-TRF-3 | Same `Idempotency-Key` twice | One transfer; same result returned (INV-3) |
+| T-TRF-4 | Same key sent concurrently (10x) | Exactly one transfer |
+| T-TRF-5 | Missing `Idempotency-Key` | 400 |
+| T-TRF-6 | Self-transfer / unknown recipient | Rejected with clear error code |
+| T-TRF-7 | State machine transitions | Only allowed transitions per spec §5 |
+| T-TRF-8 | Failure after hold (ledger down) | COMPENSATING, then FAILED; hold released |
+| T-TRF-9 | Get status of unknown / other user's transfer | 404 / 403 |
+| T-LED-1 | Posted transfer creates debit + credit | Entries sum to zero (INV-4) |
+| T-LED-2 | Update/delete a ledger entry | Not possible (immutable) |
+| T-LED-3 | Same posting requested twice | Posted once |
+| T-CON-1 | 1,000 concurrent transfers from shared wallets | No negative balance (INV-1) |
+| T-CON-2 | Sum of balances before vs after the load | Unchanged (INV-2) |
+| T-CON-3 | Opposite concurrent transfers A↔B | No deadlock |
 
-### History (F6)
+## Week 3 — Kafka, Outbox, Saga, Bank
 
 | ID | Case | Expected |
 |---|---|---|
-| T-HIS-1 | After top-up and transfers | Newest first; correct type, amount, counterparty |
-| T-HIS-2 | Sender and recipient views | Each sees the transfer once, with the right direction |
-| T-HIS-3 | User sees only their own transactions | Other users' entries never returned |
+| T-OUT-1 | Business change and outbox row | Written in one transaction; rollback removes both |
+| T-OUT-2 | Relay publishes pending rows | Event on Kafka with correct key and envelope; row marked sent |
+| T-OUT-3 | Kafka down, then up | Events delivered after recovery; none lost (INV-5) |
+| T-OUT-4 | Two relay instances | No double-claim (`SKIP LOCKED`) |
+| T-EVT-1 | Event envelope | Has `eventId`, `eventType`, `occurredAt`, `version` |
+| T-EVT-2 | Duplicate event delivered | Handled once (INV-6) |
+| T-EVT-3 | Poison message | Retries with backoff, then lands in DLT |
+| T-EVT-4 | Permanent error type | Skips retries, goes to DLT |
+| T-EVT-5 | Events for one wallet | Processed in order (same key/partition) |
+| T-SAG-1 | Happy path across services via events | COMPLETED |
+| T-SAG-2 | Failure at each step (hold, ledger, capture) | Correct compensation; money conserved (INV-2) |
+| T-SAG-3 | Service restarts mid-saga | Saga resumes and finishes |
+| T-BNK-1 | Bank times out on top-up | Retried within limits; clear failure after exhaustion |
+| T-BNK-2 | Bank fails randomly (many runs) | No duplicate credit, no lost money |
+| T-DRL-1 | **Drill**: stop Kafka during load, restart | All events eventually delivered; invariants hold |
 
-### Concurrency
+## Week 4 — Notification, Gateway, Kubernetes
 
 | ID | Case | Expected |
 |---|---|---|
-| T-CON-1 | 100 parallel transfers of 10 from a wallet holding 500 | Exactly 50 succeed; rest `INSUFFICIENT_FUNDS`; balance never negative |
-| T-CON-2 | Opposite transfers A→B and B→A in parallel (many) | No deadlock; total money unchanged |
+| T-NTF-1 | `TransferCompleted` event | Both parties get a notification, stored as SENT |
+| T-NTF-2 | `TransferFailed` event | Sender notified |
+| T-NTF-3 | Same event twice | One notification |
+| T-NTF-4 | Sender temporary failure | Goes to retry topic, then DLT after attempts |
+| T-NTF-5 | List, mark read, unread-count | Counts and flags correct |
+| T-NTF-6 | Preferences change | Respected; cached in Redis and refreshed on update |
+| T-GW-1 | No / invalid JWT | Rejected at gateway |
+| T-GW-2 | Rate limit exceeded | 429 |
+| T-GW-3 | Routing to each service | Correct service reached |
+| T-K8S-1 | `kubectl apply -f k8s/ -n paynest` | All pods Running and Ready |
+| T-K8S-2 | Kill a pod | Replacement starts; traffic continues |
+| T-K8S-3 | Probes | Startup/readiness/liveness respond; liveness does not depend on DB/Kafka |
+| T-K8S-4 | ConfigMap / Secret usage | Config injected; no secrets in images or repo |
+| T-CI-1 | CI workflow on push | Build + tests run and pass |
+| T-E2E-1 | Register two users, top up, transfer, check notifications | Whole flow works on the cluster |
 
-### Manual frontend checklist
+## Invariant coverage
 
-- [ ] Register → login → see balance 0
-- [ ] Top up → balance and history update
-- [ ] Transfer to a second account → both accounts correct
-- [ ] Error messages shown for insufficient funds, unknown email, bad input
-- [ ] Logout blocks access to the wallet page
+| Invariant | Tests |
+|---|---|
+| INV-1 | T-WAL-4, T-WAL-7, T-TRF-2, T-CON-1 |
+| INV-2 | T-CON-2, T-SAG-2, T-BNK-2 |
+| INV-3 | T-TRF-3, T-TRF-4 |
+| INV-4 | T-LED-1, T-LED-2 |
+| INV-5 | T-OUT-3, T-DRL-1 |
+| INV-6 | T-EVT-2, T-NTF-3 |
 
 ## Exit criteria
 
-- All automated tests pass on a clean checkout.
-- T-CON-1 and T-CON-2 pass repeatedly (run 5 times).
-- Manual checklist complete.
+- Week 1: T-USR-*, T-WAL-* green.
+- Week 2: T-TRF-*, T-LED-*, T-CON-* green; load result recorded.
+- Week 3: T-OUT-*, T-EVT-*, T-SAG-*, T-BNK-* green; Kafka drill passes.
+- Week 4: T-NTF-*, T-GW-*, T-K8S-*, T-CI-1, T-E2E-1 green.

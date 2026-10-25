@@ -13,7 +13,12 @@ Entry format:
 
 ---
 
-## 2026-10-25 — Initial specs
-- Changed: created `product-spec.md`, `implementation-plan.md`, `test-plan.md`, `change-log.md`.
-- Why: start spec-driven development of a simple PayNest web app, based on README.md.
-- Impact: MVP scoped to a single Spring Boot app (register/login, wallet, top-up, transfer, history). Microservices, Kafka, Outbox, Saga and Kubernetes from the README are deferred. No code written yet.
+## 2026-10-25 — Rebase specs on the full README architecture
+- Changed: rewrote `product-spec.md`, `implementation-plan.md`, `test-plan.md` to follow README.md: seven services, Kafka, Transactional Outbox, Saga, Kubernetes, and the 4-week roadmap.
+- Why: the first draft (v0.1) reduced scope to a single-app MVP, but the intended project is the microservices system described in README.md.
+- Impact: the plan is now four weekly phases with exit checks; the test plan maps tests to invariants INV-1 to INV-6. The single-app MVP scope is dropped.
+
+## 2026-10-25 — Initial specs (v0.1, superseded)
+- Changed: created the four spec files for a simplified single-app MVP.
+- Why: first interpretation of the request.
+- Impact: replaced by the entry above. No code written.

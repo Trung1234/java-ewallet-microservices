@@ -1,0 +1,50 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: ledger-service
+  datasource:
+    url: jdbc:postgresql://localhost:5433/ledger_db
+    username: ledger_user
+    password: ${LEDGER_DB_PASSWORD:ledger_pass}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 15000
+    consumer:
+      auto-offset-reset: earliest
+
+paynest:
+  jwt:
+    secret: ${JWT_SECRET:local-dev-secret-change-me-at-least-32-bytes}
+  ledger:
+    # Transfers above this amount are rejected -> the saga runs its compensation.
+    max-transfer-amount: 50000000
+    # Share of transfers rejected at random (0.0 - 1.0), for failure drills.
+    failure-rate: 0.0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+  metrics:
+    tags:
+      application: ${spring.application.name}

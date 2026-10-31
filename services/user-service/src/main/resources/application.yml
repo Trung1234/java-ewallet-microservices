@@ -1,0 +1,35 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+  mongodb:
+    uri: mongodb://localhost:27017/paynest_users
+  data:
+    mongodb:
+      auto-index-creation: true
+
+paynest:
+  jwt:
+    secret: ${JWT_SECRET:local-dev-secret-change-me-at-least-32-bytes}
+    ttl: 1h
+  security:
+    public-paths:
+      - /auth/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,mongo
+  metrics:
+    tags:
+      application: ${spring.application.name}

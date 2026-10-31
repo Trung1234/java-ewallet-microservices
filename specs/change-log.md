@@ -13,6 +13,11 @@ Entry format:
 
 ---
 
+## 2026-10-31 — Add class diagrams from the source code
+- Changed: added `architect.md` with Mermaid class diagrams for every library and service, derived from the current code.
+- Why: there was no class-level view of the system; the README only covers services and flows.
+- Impact: documentation only. No plan steps or tests change.
+
 ## 2026-10-25 — Rebase specs on the full README architecture
 - Changed: rewrote `product-spec.md`, `implementation-plan.md`, `test-plan.md` to follow README.md: seven services, Kafka, Transactional Outbox, Saga, Kubernetes, and the 4-week roadmap.
 - Why: the first draft (v0.1) reduced scope to a single-app MVP, but the intended project is the microservices system described in README.md.

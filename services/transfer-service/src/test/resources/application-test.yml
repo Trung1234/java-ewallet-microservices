@@ -1,0 +1,3 @@
+paynest:
+  outbox:
+    poll-interval-ms: 200

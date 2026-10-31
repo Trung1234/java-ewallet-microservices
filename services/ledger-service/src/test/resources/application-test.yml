@@ -1,0 +1,5 @@
+paynest:
+  outbox:
+    poll-interval-ms: 200
+  ledger:
+    max-transfer-amount: 1000000

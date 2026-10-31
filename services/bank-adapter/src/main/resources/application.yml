@@ -1,0 +1,27 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: bank-adapter
+
+paynest:
+  bank:
+    # 20% of calls fail with 503, 10% succeed but answer after 5s (longer than the wallet's 2s timeout).
+    failure-rate: 0.2
+    timeout-rate: 0.1
+    slow-response: 5s
+    max-amount: 100000000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

@@ -1,0 +1,53 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: wallet-service
+  datasource:
+    url: jdbc:postgresql://localhost:5433/wallet_db
+    username: wallet_user
+    password: ${WALLET_DB_PASSWORD:wallet_pass}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # Update rows in primary-key order so two transfers A->B and B->A cannot deadlock.
+        order_updates: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 15000
+    consumer:
+      auto-offset-reset: earliest
+
+paynest:
+  jwt:
+    secret: ${JWT_SECRET:local-dev-secret-change-me-at-least-32-bytes}
+  bank:
+    url: http://localhost:8085
+  wallet:
+    currency: VND
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+  metrics:
+    tags:
+      application: ${spring.application.name}

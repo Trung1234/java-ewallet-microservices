@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: paynest
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - api-gateway:8080
+          - user-service:8081
+          - wallet-service:8082
+          - transfer-service:8083
+          - ledger-service:8084
+          - bank-adapter:8085
+          - notification-service:8086

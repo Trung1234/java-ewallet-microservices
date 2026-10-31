@@ -1,0 +1,55 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: notification-service
+  mongodb:
+    uri: mongodb://localhost:27017/paynest_notifications
+  data:
+    mongodb:
+      auto-index-creation: true
+    redis:
+      host: localhost
+      port: 6379
+  cache:
+    type: redis
+    redis:
+      time-to-live: 10m
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      # used to forward failed events to retry topics and the DLT
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      auto-offset-reset: earliest
+
+paynest:
+  jwt:
+    secret: ${JWT_SECRET:local-dev-secret-change-me-at-least-32-bytes}
+  notification:
+    retry:
+      attempts: 4
+      delay-ms: 1000
+      multiplier: 5.0
+    email:
+      # Share of e-mails that fail like an unreachable SMTP server (0.0 - 1.0).
+      failure-rate: 0.0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,mongo,redis
+  metrics:
+    tags:
+      application: ${spring.application.name}

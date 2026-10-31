@@ -21,7 +21,7 @@ Hệ thống chạy cùng lúc nhiều container (các service Spring Boot, Post
 | Công cụ | Mục đích |
 |---|---|
 | **WSL2** | Nền tảng để Docker chạy trên Windows |
-| **JDK 21 hoặc 25** (LTS, Eclipse Temurin) | Biên dịch và chạy Java |
+| **JDK 25** (LTS, Eclipse Temurin) | Biên dịch và chạy Java |
 | **Git** | Quản lý mã nguồn |
 | **IntelliJ IDEA** (Community là đủ) | IDE chính cho Spring Boot |
 | **Docker Desktop** | Chạy Kafka, PostgreSQL, MongoDB, Redis bằng `docker compose` |
@@ -70,7 +70,7 @@ Mở PowerShell và chạy:
 
 ```powershell
 # Bắt buộc
-winget install EclipseAdoptium.Temurin.21.JDK
+winget install EclipseAdoptium.Temurin.25.JDK
 winget install Git.Git
 winget install JetBrains.IntelliJIDEA.Community
 winget install Docker.DockerDesktop
@@ -134,7 +134,7 @@ kubectl version --client
 ## 8. Checklist
 
 - [ ] WSL2 đã cài và khởi động lại máy
-- [ ] `java -version` hiển thị JDK 21 hoặc 25
+- [ ] `java -version` hiển thị JDK 25
 - [ ] `git --version` chạy được
 - [ ] Docker Desktop mở được, `docker run hello-world` thành công
 - [ ] Đã tạo `.wslconfig` giới hạn RAM

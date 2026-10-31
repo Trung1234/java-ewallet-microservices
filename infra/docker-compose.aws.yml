@@ -1,0 +1,128 @@
+# PayNest on one EC2 instance. Adds to docker-compose.yml, which stays the local setup.
+#
+#   cp infra/.env.aws.example infra/.env        then fill in the secrets
+#   ./mvnw -q -DskipTests package
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.aws.yml --profile apps up -d --build
+#
+# Needs: Compose 2.24+ (for !reset) and an instance role that may write to CloudWatch.
+# The services get credentials from the instance metadata service from inside a container, one
+# network hop further than the host. Keep the instance's metadata hop limit at 2 or more
+# (the Amazon Linux 2023 default), otherwise metrics fail while logs still work.
+
+x-aws-logging: &aws-logging
+  logging:
+    driver: awslogs
+    options:
+      awslogs-region: ${AWS_REGION:-ap-southeast-1}
+      awslogs-group: /paynest/app
+      awslogs-create-group: "true"
+      # One log stream per container.
+      tag: "{{.Name}}"
+      # If CloudWatch is unreachable, drop log lines rather than block the service writing them.
+      mode: non-blocking
+      max-buffer-size: 4m
+
+# Infrastructure logs stay on the disk, with a limit so they cannot fill it.
+x-local-logging: &local-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-app: &app
+  <<: *aws-logging
+  # Longer than the 30 s Spring waits for running requests. Docker kills after 10 s by default.
+  stop_grace_period: 35s
+
+x-aws-env: &aws-env
+  SPRING_PROFILES_ACTIVE: aws
+  AWS_REGION: ${AWS_REGION:-ap-southeast-1}
+
+services:
+  # Only the gateway is published. !reset removes the host ports set in docker-compose.yml, so the
+  # databases and Kafka stay on the Docker network whatever the Security Group allows.
+  postgres:
+    <<: *local-logging
+    ports: !reset []
+    mem_limit: 512m
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in infra/.env}
+      WALLET_DB_PASSWORD: ${WALLET_DB_PASSWORD:?set it in infra/.env}
+      TRANSFER_DB_PASSWORD: ${TRANSFER_DB_PASSWORD:?set it in infra/.env}
+      LEDGER_DB_PASSWORD: ${LEDGER_DB_PASSWORD:?set it in infra/.env}
+
+  mongo:
+    <<: *local-logging
+    ports: !reset []
+    mem_limit: 512m
+
+  redis:
+    <<: *local-logging
+    ports: !reset []
+    mem_limit: 128m
+
+  kafka:
+    <<: *local-logging
+    ports: !reset []
+    mem_limit: 1g
+    environment:
+      # The Kafka default heap is 1g, which alone would hit the limit above.
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+
+  user-service:
+    <<: *app
+    ports: !reset []
+    mem_limit: 512m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}
+
+  wallet-service:
+    <<: *app
+    ports: !reset []
+    mem_limit: 768m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}
+      WALLET_DB_PASSWORD: ${WALLET_DB_PASSWORD:?set it in infra/.env}
+
+  transfer-service:
+    <<: *app
+    ports: !reset []
+    mem_limit: 768m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}
+      TRANSFER_DB_PASSWORD: ${TRANSFER_DB_PASSWORD:?set it in infra/.env}
+
+  ledger-service:
+    <<: *app
+    ports: !reset []
+    mem_limit: 768m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}
+      LEDGER_DB_PASSWORD: ${LEDGER_DB_PASSWORD:?set it in infra/.env}
+
+  bank-adapter:
+    <<: *app
+    ports: !reset []
+    mem_limit: 512m
+    environment:
+      <<: *aws-env
+
+  notification-service:
+    <<: *app
+    ports: !reset []
+    mem_limit: 768m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}
+
+  api-gateway:
+    <<: *app
+    mem_limit: 512m
+    environment:
+      <<: *aws-env
+      JWT_SECRET: ${JWT_SECRET:?set it in infra/.env}

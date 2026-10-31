@@ -52,7 +52,7 @@ Kiểm tra: `brew --version`
 
 | Công cụ | Mục đích |
 |---|---|
-| **JDK 21 hoặc 25** (LTS, Eclipse Temurin) | Biên dịch và chạy Java |
+| **JDK 25** (LTS, Eclipse Temurin) | Biên dịch và chạy Java |
 | **Git** | Quản lý mã nguồn |
 | **IntelliJ IDEA** (Community là đủ) | IDE chính cho Spring Boot |
 | **Docker Desktop** | Chạy Kafka, PostgreSQL, MongoDB, Redis bằng `docker compose` |
@@ -89,7 +89,7 @@ Kiểm tra: `brew --version`
 
 ```bash
 # Bắt buộc
-brew install --cask temurin@21
+brew install --cask temurin@25
 brew install git
 brew install --cask intellij-idea-ce
 brew install --cask docker
@@ -119,7 +119,7 @@ Sau khi cài Docker, mở **Docker Desktop** từ Launchpad ít nhất một l�
 Thêm vào `~/.zshrc`:
 
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
@@ -161,7 +161,7 @@ kubectl version --client
 ## 11. Checklist
 
 - [ ] Homebrew đã cài (`brew --version`)
-- [ ] `java -version` hiển thị JDK 21 hoặc 25
+- [ ] `java -version` hiển thị JDK 25
 - [ ] `JAVA_HOME` trỏ đúng JDK
 - [ ] `git --version` chạy được
 - [ ] Docker Desktop mở được, `docker run hello-world` thành công

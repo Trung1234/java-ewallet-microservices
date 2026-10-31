@@ -1,5 +1,7 @@
 server:
   port: 8084
+  # Finish running requests when the container stops.
+  shutdown: graceful
 
 spring:
   application:

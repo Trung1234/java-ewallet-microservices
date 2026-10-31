@@ -116,7 +116,7 @@ Local runs must not change: every case below applies only with the `aws` profile
 |---|---|---|
 | T-OPS-1 | `docker compose config` on both compose files with `--profile apps` | Only the gateway publishes a port; all containers have `mem_limit`, total under 8 GB; services use `awslogs` and the `aws` profile |
 | T-OPS-2 | Same command without `infra/.env` | Refused: `JWT_SECRET` and the database passwords are required |
-| T-OPS-3 | Whole system with the `aws` profile and the memory limits, CloudWatch replaced by a local fake endpoint; run `scripts/e2e.sh` | E2E passes; no container OOM-killed; each service publishes to namespace `PayNest`; a transfer's `transferId` appears in the JSON logs of transfer, wallet and ledger services |
+| T-OPS-3 | Whole system with both compose files, plus a third override: `json-file` logging, dummy AWS keys and `AWS_ENDPOINT_URL` pointing at a local fake endpoint; run `scripts/e2e.sh` | E2E passes; no container OOM-killed; each service publishes to namespace `PayNest`; a transfer's `transferId` appears in the JSON logs of transfer, wallet and ledger services |
 | T-OPS-4 | `docker compose stop` during a request | Request finishes; services exit within `stop_grace_period`, not killed (exit code 143, not 137) |
 | T-OPS-5 | Regression: `docker compose -f infra/docker-compose.yml --profile apps up`, then `scripts/e2e.sh` | Passes with plain text logs and no AWS configuration |
 
@@ -131,7 +131,7 @@ Follow [aws-setup.md](../aws-setup.md). These cost money while the instance runs
 | T-AWS-3 | Container logs | Log group `/paynest/app` has one stream per service; retention set to 7 days; infrastructure containers are not in it |
 | T-AWS-4 | Logs Insights query on a `transferId` from `scripts/e2e.sh` | Returns lines from transfer, wallet and ledger services, in order |
 | T-AWS-5 | Secrets in logs | Query for `password`, `Bearer`, `accessToken` and the JWT secret after an E2E run returns nothing |
-| T-AWS-6 | Namespace `PayNest` after an E2E run | `paynest.transfer.completed.count`, `paynest.transfer.failed.count`, `paynest.transfer.latency.*`, `http.server.requests.*`, `jvm.memory.used` present, per service |
+| T-AWS-6 | Namespace `PayNest` after an E2E run | `paynest.transfer.completed.count`, `paynest.transfer.failed.count`, `paynest.transfer.latency.*` present for transfer-service; `http.server.requests.*`, `jvm.memory.used.value` present per service |
 | T-AWS-7 | Namespace `CWAgent` | `mem_used_percent` and `disk_used_percent` present |
 | T-AWS-8 | Alarm test: `aws cloudwatch set-alarm-state` on each alarm | SNS email arrives at `paynest-alerts` |
 | T-AWS-9 | Metric filter `{ $.log.level = "ERROR" }`, after forcing an error | `PayNest/Logs` `ErrorCount` goes up |

@@ -4,10 +4,11 @@
 #   ./mvnw -q -DskipTests package
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.aws.yml --profile apps up -d --build
 #
-# Needs: Compose 2.24+ (for !reset) and an instance role that may write to CloudWatch.
+# Needs: Compose 2.24+ (for !reset), a JDK matching java.version in pom.xml (for the build), and an
+# instance role that may write to CloudWatch.
 # The services get credentials from the instance metadata service from inside a container, one
-# network hop further than the host. Keep the instance's metadata hop limit at 2 or more
-# (the Amazon Linux 2023 default), otherwise metrics fail while logs still work.
+# network hop further than the host. Set the instance's metadata hop limit to 2 or more, otherwise
+# metrics fail while logs still work.
 
 x-aws-logging: &aws-logging
   logging:

@@ -1,6 +1,6 @@
 # Test Plan — PayNest
 
-Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*) and the weekly exits in [implementation-plan.md](implementation-plan.md).
+Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*), the weekly exits in [implementation-plan.md](implementation-plan.md) and the deployment in [aws-setup.md](../aws-setup.md).
 
 ## Strategy
 
@@ -8,6 +8,7 @@ Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*)
 - **Unit tests** only for pure logic (state machine, validation).
 - **Load/concurrency tests** with k6 or Gatling in `load-test/`.
 - **Failure drills** (Kafka down, bank flaky) are scripted and documented.
+- **AWS is never called from automated tests.** The CloudWatch client is a mock; everything that needs a real account is a manual T-AWS case.
 - Each invariant INV-1 to INV-6 has at least one test.
 
 ## Week 1 — User and Wallet
@@ -87,6 +88,56 @@ Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*)
 | T-CI-1 | CI workflow on push | Build + tests run and pass |
 | T-E2E-1 | Register two users, top up, transfer, check notifications | Whole flow works on the cluster |
 
+## AWS deployment and CloudWatch
+
+Local runs must not change: every case below applies only with the `aws` profile or `infra/docker-compose.aws.yml`, unless it says otherwise.
+
+### Metrics (automated)
+
+| ID | Case | Expected |
+|---|---|---|
+| T-MET-1 | Start without the `aws` profile | No CloudWatch beans; Prometheus endpoint still works |
+| T-MET-2 | Register meters with the `aws` profile | CloudWatch gets only `paynest.*`, `http.server.requests` and heap `jvm.memory.used`, without the tags `exception`, `method`, `outcome`, `error`; Prometheus still gets every meter |
+| T-MET-3 | Publish | Namespace `PayNest`, dimension `application` = service name |
+| T-MET-4 | Transfer completes | `paynest.transfer.completed` +1 and one `paynest.transfer.latency` sample; nothing counted before `FundsCaptured` |
+| T-MET-5 | Transfer fails on hold, or after compensation | `paynest.transfer.failed` +1 with `reason` = failure code; for compensation, only after `FundsReleased` |
+| T-MET-6 | Replayed reply, or saga step rolled back | Not counted again (metrics are recorded after commit) |
+
+### Logs (automated)
+
+| ID | Case | Expected |
+|---|---|---|
+| T-LOG-1 | Log a line with the `aws` profile | One ECS JSON object per line, with `message`, `log.level`, `service.name` and the MDC field `transferId` |
+| T-LOG-2 | Log a line without the `aws` profile | Plain text, as before |
+
+### Deployment (run with Docker, no AWS account)
+
+| ID | Case | Expected |
+|---|---|---|
+| T-OPS-1 | `docker compose config` on both compose files with `--profile apps` | Only the gateway publishes a port; all containers have `mem_limit`, total under 8 GB; services use `awslogs` and the `aws` profile |
+| T-OPS-2 | Same command without `infra/.env` | Refused: `JWT_SECRET` and the database passwords are required |
+| T-OPS-3 | Whole system with the `aws` profile and the memory limits, CloudWatch replaced by a local fake endpoint; run `scripts/e2e.sh` | E2E passes; no container OOM-killed; each service publishes to namespace `PayNest`; a transfer's `transferId` appears in the JSON logs of transfer, wallet and ledger services |
+| T-OPS-4 | `docker compose stop` during a request | Request finishes; services exit within `stop_grace_period`, not killed (exit code 143, not 137) |
+| T-OPS-5 | Regression: `docker compose -f infra/docker-compose.yml --profile apps up`, then `scripts/e2e.sh` | Passes with plain text logs and no AWS configuration |
+
+### On EC2 (manual, needs an AWS account)
+
+Follow [aws-setup.md](../aws-setup.md). These cost money while the instance runs; do the clean-up of §10 afterwards.
+
+| ID | Case | Expected |
+|---|---|---|
+| T-AWS-1 | Security Group, from another network | Ports 8080 and 22 closed outside My IP; from My IP, only 8080 answers (not 5433, 9092, 27017, 6379, 8081-8086) |
+| T-AWS-2 | Instance credentials | No access key on the instance; services and the Docker log driver authenticate with `paynest-ec2-role` |
+| T-AWS-3 | Container logs | Log group `/paynest/app` has one stream per service; retention set to 7 days; infrastructure containers are not in it |
+| T-AWS-4 | Logs Insights query on a `transferId` from `scripts/e2e.sh` | Returns lines from transfer, wallet and ledger services, in order |
+| T-AWS-5 | Secrets in logs | Query for `password`, `Bearer`, `accessToken` and the JWT secret after an E2E run returns nothing |
+| T-AWS-6 | Namespace `PayNest` after an E2E run | `paynest.transfer.completed.count`, `paynest.transfer.failed.count`, `paynest.transfer.latency.*`, `http.server.requests.*`, `jvm.memory.used` present, per service |
+| T-AWS-7 | Namespace `CWAgent` | `mem_used_percent` and `disk_used_percent` present |
+| T-AWS-8 | Alarm test: `aws cloudwatch set-alarm-state` on each alarm | SNS email arrives at `paynest-alerts` |
+| T-AWS-9 | Metric filter `{ $.log.level = "ERROR" }`, after forcing an error | `PayNest/Logs` `ErrorCount` goes up |
+| T-AWS-10 | Reboot the instance | All containers return (`restart: unless-stopped`); balances intact (INV-2) |
+| T-AWS-11 | Custom metric count, after the E2E run | `aws cloudwatch list-metrics --namespace PayNest` count recorded; expected cost matches the budget |
+
 ## Invariant coverage
 
 | Invariant | Tests |
@@ -104,3 +155,5 @@ Maps to [product-spec.md](product-spec.md) (requirements FR-*, invariants INV-*)
 - Week 2: T-TRF-*, T-LED-*, T-CON-* green; load result recorded.
 - Week 3: T-OUT-*, T-EVT-*, T-SAG-*, T-BNK-* green; Kafka drill passes.
 - Week 4: T-NTF-*, T-GW-*, T-K8S-*, T-CI-1, T-E2E-1 green.
+- AWS code: T-MET-*, T-LOG-*, T-OPS-* green.
+- AWS deployment: T-AWS-* checked once on a real instance; instance stopped or terminated afterwards.

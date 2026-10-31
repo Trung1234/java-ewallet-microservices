@@ -3,6 +3,9 @@ package com.paynest.transfer.service;
 import java.util.List;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -22,6 +25,8 @@ import com.paynest.web.ApiException;
  */
 @Service
 public class TransferService {
+
+    private static final Logger log = LoggerFactory.getLogger(TransferService.class);
 
     private final TransferRepository transfers;
     private final WalletDirectoryRepository directory;
@@ -56,6 +61,9 @@ public class TransferService {
                         new Transfer(idempotencyKey, userId, from.getWalletId(), to.getUserId(), to.getWalletId(), amount));
                 outbox.append(TransferSaga.AGGREGATE, transfer.getFromWalletId(), Topics.WALLET_COMMANDS,
                         new HoldFunds(transfer.getId(), transfer.getFromWalletId(), amount));
+                try (var ignored = MDC.putCloseable("transferId", transfer.getId().toString())) {
+                    log.info("Transfer accepted amount={}", amount);
+                }
                 return transfer;
             });
         } catch (DataIntegrityViolationException sameKeyConcurrently) {

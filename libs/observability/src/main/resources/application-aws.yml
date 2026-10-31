@@ -1,0 +1,9 @@
+# Shared by all services. A service must not add its own application-aws.yml: only the first one
+# on the classpath is loaded, so it would replace this file.
+logging:
+  structured:
+    format:
+      # One JSON object per line, so CloudWatch Logs Insights can filter on fields.
+      console: ecs
+  level:
+    root: INFO

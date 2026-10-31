@@ -1,6 +1,6 @@
 # Architecture — Class Diagrams
 
-Class-level view of PayNest, derived from the code in `libs/` and `services/`. It describes what is implemented today. For intended behaviour see [product-spec.md](product-spec.md); for where the code differs from the README diagrams see [§13](#13-differences-from-the-readme-diagrams).
+Class-level view of PayNest, derived from the code in `libs/` and `services/`. It describes what is implemented today. For intended behaviour see [product-spec.md](product-spec.md); for where the code differs from the README diagrams see [§15](#15-differences-from-the-readme-diagrams).
 
 ## Contents
 
@@ -9,14 +9,16 @@ Class-level view of PayNest, derived from the code in `libs/` and `services/`. I
 3. [common-events](#3-common-events)
 4. [outbox](#4-outbox)
 5. [common-web](#5-common-web)
-6. [user-service](#6-user-service)
-7. [wallet-service](#7-wallet-service)
-8. [transfer-service](#8-transfer-service)
-9. [ledger-service](#9-ledger-service)
-10. [notification-service](#10-notification-service)
-11. [bank-adapter and api-gateway](#11-bank-adapter-and-api-gateway)
-12. [How the services connect](#12-how-the-services-connect)
-13. [Differences from the README diagrams](#13-differences-from-the-readme-diagrams)
+6. [observability](#6-observability)
+7. [user-service](#7-user-service)
+8. [wallet-service](#8-wallet-service)
+9. [transfer-service](#9-transfer-service)
+10. [ledger-service](#10-ledger-service)
+11. [notification-service](#11-notification-service)
+12. [bank-adapter and api-gateway](#12-bank-adapter-and-api-gateway)
+13. [How the services connect](#13-how-the-services-connect)
+14. [AWS deployment](#14-aws-deployment)
+15. [Differences from the README diagrams](#15-differences-from-the-readme-diagrams)
 
 ---
 
@@ -39,6 +41,7 @@ flowchart TB
         CW["common-web"]
         OB["outbox"]
         CE["common-events"]
+        OBS["observability"]
     end
     US --> CW
     WS --> CW & OB
@@ -46,9 +49,10 @@ flowchart TB
     LS --> CW & OB
     NS --> CW & CE
     OB --> CE
+    GW & US & WS & TS & LS & BA & NS --> OBS
 ```
 
-`api-gateway` and `bank-adapter` use no shared library. The gateway is reactive, and `common-web` is servlet-based, so the gateway keeps its own `JwtProperties` and `SecurityConfig`.
+`api-gateway` and `bank-adapter` use only `observability`. The gateway is reactive, and `common-web` is servlet-based, so the gateway keeps its own `JwtProperties` and `SecurityConfig`.
 
 ## 2. How to read the diagrams
 
@@ -368,7 +372,39 @@ classDiagram
 
 ---
 
-## 6. user-service
+## 6. observability
+
+Package `com.paynest.observability`. What the seven services need for the `aws` profile. It works on both the servlet services and the reactive gateway. Without that profile none of it loads, so local runs never touch AWS.
+
+- **`CloudWatchMetricsAutoConfiguration`** is an auto-configuration, not a scanned component, because `api-gateway` and `bank-adapter` only scan their own package. Region and credentials come from the AWS SDK default chain; on EC2 that is the instance's IAM role.
+- **Cost control** is set on the CloudWatch registry itself. It sends only `paynest.*`, `http.server.requests` and heap `jvm.memory.used`, and drops the tags `exception`, `method`, `outcome` and `error`. The Prometheus registry still gets everything.
+- **`application-aws.yml`** in this library switches the console log to ECS JSON. Only the first file with that name on the classpath is loaded, so a service must not add its own.
+- The dimension that identifies the service is the existing `application` tag, set by `management.metrics.tags` in each service.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class CloudWatchMetricsAutoConfiguration {
+        <<AutoConfiguration>>
+        ~cloudWatchAsyncClient() CloudWatchAsyncClient
+        ~cloudWatchMeterRegistry(CloudWatchAsyncClient, Clock, String namespace, Duration step) CloudWatchMeterRegistry
+    }
+    class CloudWatchMeterRegistry {
+        <<Micrometer>>
+    }
+    class CloudWatchAsyncClient {
+        <<AWS SDK>>
+    }
+
+    CloudWatchMetricsAutoConfiguration ..> CloudWatchAsyncClient : creates bean
+    CloudWatchMetricsAutoConfiguration ..> CloudWatchMeterRegistry : creates bean
+    CloudWatchMeterRegistry --> CloudWatchAsyncClient
+```
+
+---
+
+## 7. user-service
 
 Package `com.paynest.user`. Registration, login and simulated KYC, stored in MongoDB. It is the only service that signs JWTs. It has no Kafka dependency.
 
@@ -489,7 +525,7 @@ classDiagram
 
 ---
 
-## 7. wallet-service
+## 8. wallet-service
 
 Package `com.paynest.wallet`. Balances, holds, top-up and withdrawal, stored in PostgreSQL.
 
@@ -705,13 +741,14 @@ classDiagram
 
 ---
 
-## 8. transfer-service
+## 9. transfer-service
 
 Package `com.paynest.transfer`. Saga orchestrator for transfers, stored in PostgreSQL.
 
 - **`TransferService`** stores the `PENDING` transfer and the first command (`HoldFunds`) in one transaction, then returns 202. `transfers` has a unique key on `(from_user_id, idempotency_key)`.
 - **`TransferSaga`** moves the transfer one step for each reply and emits the next command through the outbox. It only acts when the transfer is in the expected state, so late or replayed replies do nothing.
 - **`WalletDirectoryEntry`** is a local read model of wallet ownership, fed by `WalletCreated` events, so a transfer needs no call to wallet-service.
+- **`TransferMetrics`** records the business metrics after the commit, so a saga step that rolls back and is retried is not counted twice.
 
 ```mermaid
 classDiagram
@@ -753,6 +790,13 @@ classDiagram
         <<Service>>
         ~String AGGREGATE$
         +handle(EventEnvelope envelope) void
+    }
+    class TransferMetrics {
+        <<Component>>
+        -Counter completed
+        -Timer latency
+        +completed(Duration took) void
+        +failed(String reason) void
     }
     class Transfer {
         <<entity>>
@@ -798,6 +842,9 @@ classDiagram
         <<JpaRepository>>
         +findByUserId(String userId) Optional~WalletDirectoryEntry~
     }
+    class MeterRegistry {
+        <<Micrometer>>
+    }
     class OutboxWriter {
         <<lib>>
     }
@@ -824,6 +871,8 @@ classDiagram
     TransferSaga --> OutboxWriter
     TransferSaga --> Inbox
     TransferSaga --> EventCodec
+    TransferSaga --> TransferMetrics
+    TransferMetrics --> MeterRegistry
 
     TransferRepository ..> Transfer
     WalletDirectoryRepository ..> WalletDirectoryEntry
@@ -842,9 +891,11 @@ classDiagram
 | `FundsCaptured` | `HELD` | `COMPLETED` | `TransferCompleted` |
 | `FundsReleased` | `COMPENSATING` | `FAILED` | `TransferFailed` |
 
+`TransferMetrics.completed` runs on `FundsCaptured`. `TransferMetrics.failed` runs on `FundsHoldFailed` and `FundsReleased`, with the failure code as `reason`.
+
 ---
 
-## 9. ledger-service
+## 10. ledger-service
 
 Package `com.paynest.ledger`. Double-entry ledger, stored in PostgreSQL.
 
@@ -997,7 +1048,7 @@ classDiagram
 
 ---
 
-## 10. notification-service
+## 11. notification-service
 
 Package `com.paynest.notification`. Consumes transfer outcomes and delivers notifications, stored in MongoDB, with preferences cached in Redis.
 
@@ -1202,7 +1253,7 @@ classDiagram
 
 ---
 
-## 11. bank-adapter and api-gateway
+## 12. bank-adapter and api-gateway
 
 **bank-adapter** (package `com.paynest.bank`) is a fake bank that fails on purpose. Its state is in memory and it is idempotent on `reference`. The gateway does not route to it, and only `BankClient` in wallet-service calls it.
 
@@ -1286,7 +1337,7 @@ classDiagram
 
 ---
 
-## 12. How the services connect
+## 13. How the services connect
 
 No service calls another's classes. The links between them are Kafka topics, one internal HTTP call, and the gateway routes.
 
@@ -1317,9 +1368,73 @@ Each listener reads every message on its topics and ignores the types it does no
 | `/ledger/**` | `LedgerController` |
 | `/notifications/**`, `/preferences/**` | `NotificationController` |
 
+**Following one transfer in the logs.** `TransferService`, `TransferSaga`, `WalletCommandService` and `LedgerMessageService` put `transferId` in the MDC for the log lines of a saga step. There is no distributed tracing: the outbox relay publishes from a scheduled job, so a trace context would not cross it without storing it in the `outbox` table.
+
 ---
 
-## 13. Differences from the README diagrams
+## 14. AWS deployment
+
+One EC2 instance runs the whole Compose stack; the steps are in [aws-setup.md](../aws-setup.md). `infra/docker-compose.aws.yml` is added on top of `infra/docker-compose.yml`, which stays the local setup.
+
+```mermaid
+flowchart TB
+    Client["Postman"] -- "HTTP :8080, My IP only" --> GW
+
+    subgraph AWS["AWS ap-southeast-1"]
+        subgraph EC2["EC2 instance, role paynest-ec2-role"]
+            subgraph DC["Docker network"]
+                GW["api-gateway"]
+                SVC["user, wallet, transfer, ledger,<br/>notification, bank-adapter"]
+                INFRA["postgres, mongo, redis, kafka<br/>no host ports"]
+            end
+            AGENT["CloudWatch Agent"]
+        end
+
+        subgraph CW["CloudWatch"]
+            LOGS["Logs /paynest/app"]
+            METRICS["Metrics<br/>PayNest, CWAgent, AWS/EC2"]
+            ALARMS["Alarms"]
+        end
+        SNS["SNS paynest-alerts"]
+    end
+
+    GW --> SVC
+    SVC --> INFRA
+    GW & SVC -- "awslogs driver" --> LOGS
+    GW & SVC -- "CloudWatchMeterRegistry" --> METRICS
+    AGENT -- "RAM, disk" --> METRICS
+    LOGS -- "metric filter ErrorCount" --> METRICS
+    METRICS --> ALARMS --> SNS
+```
+
+What changes between the two setups:
+
+| Topic | Local (`docker-compose.yml`) | AWS (adds `docker-compose.aws.yml`) |
+|---|---|---|
+| Spring profile | none | `aws` |
+| Console log | plain text | ECS JSON, with `transferId` where set |
+| Metrics | Prometheus endpoint | Prometheus endpoint and CloudWatch |
+| Service logs go to | Docker's local log | CloudWatch Logs, without blocking the service if CloudWatch is unreachable |
+| Infrastructure logs go to | Docker's local log | Docker's local log, limited to 30 MB per container |
+| Host ports | all services and infrastructure | `8080` only |
+| Secrets | local defaults | required from `infra/.env`; startup is refused without them |
+| Memory limits | none | 6.6 GB in total; Kafka heap 512 MB |
+| Stop | Docker default, 10 s | 35 s, longer than Spring's 30 s graceful shutdown |
+
+Metrics in the `PayNest` namespace, each with the dimension `application`. CloudWatch adds a suffix for each statistic; `<timer>` below has `.avg`, `.sum`, `.count` and `.max`.
+
+| Metric | Other dimensions | Source |
+|---|---|---|
+| `paynest.transfer.completed.count` | | `TransferMetrics` |
+| `paynest.transfer.failed.count` | `reason` | `TransferMetrics` |
+| `paynest.transfer.latency.<timer>` | | `TransferMetrics` |
+| `paynest.transfer.latency.percentile.value` | `phi` = `0.95` | `TransferMetrics` |
+| `http.server.requests.<timer>` | `uri`, `status` | Spring Boot |
+| `jvm.memory.used.value` | `area` = `heap`, `id` | Spring Boot |
+
+---
+
+## 15. Differences from the README diagrams
 
 The README §1 overview differs from the code in these places. The diagrams in this document follow the code.
 

@@ -1,10 +1,13 @@
 package com.paynest.transfer.service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,14 +59,16 @@ public class TransferSaga {
     private final OutboxWriter outbox;
     private final Inbox inbox;
     private final EventCodec codec;
+    private final TransferMetrics metrics;
 
     public TransferSaga(TransferRepository transfers, WalletDirectoryRepository directory, OutboxWriter outbox,
-                        Inbox inbox, EventCodec codec) {
+                        Inbox inbox, EventCodec codec, TransferMetrics metrics) {
         this.transfers = transfers;
         this.directory = directory;
         this.outbox = outbox;
         this.inbox = inbox;
         this.codec = codec;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -104,27 +109,32 @@ public class TransferSaga {
                 outbox.append(AGGREGATE, transfer.getId(), Topics.TRANSFER_EVENTS, new TransferCompleted(
                         transfer.getId(), transfer.getFromWalletId(), transfer.getFromUserId(),
                         transfer.getToWalletId(), transfer.getToUserId(), transfer.getAmount()));
+                metrics.completed(Duration.between(transfer.getCreatedAt(), Instant.now()));
             });
             default -> log.debug("Ignoring {}", envelope.eventType());
         }
     }
 
     private void step(UUID transferId, TransferStatus expected, Consumer<Transfer> action) {
-        Transfer transfer = transfers.findById(transferId).orElse(null);
-        if (transfer == null) {
-            log.warn("Reply for unknown transfer {}", transferId);
-            return;
+        try (var ignored = MDC.putCloseable("transferId", transferId.toString())) {
+            Transfer transfer = transfers.findById(transferId).orElse(null);
+            if (transfer == null) {
+                log.warn("Reply for unknown transfer {}", transferId);
+                return;
+            }
+            if (transfer.getStatus() != expected) {
+                log.info("Transfer {} is {}, expected {}; reply ignored", transferId, transfer.getStatus(), expected);
+                return;
+            }
+            action.accept(transfer);
+            log.info("Saga step done, transfer is {}", transfer.getStatus());
         }
-        if (transfer.getStatus() != expected) {
-            log.info("Transfer {} is {}, expected {}; reply ignored", transferId, transfer.getStatus(), expected);
-            return;
-        }
-        action.accept(transfer);
     }
 
     private void publishFailed(Transfer transfer) {
         outbox.append(AGGREGATE, transfer.getId(), Topics.TRANSFER_EVENTS, new TransferFailed(
                 transfer.getId(), transfer.getFromWalletId(), transfer.getFromUserId(),
                 transfer.getToWalletId(), transfer.getToUserId(), transfer.getAmount(), transfer.getFailureReason()));
+        metrics.failed(transfer.getFailureReason());
     }
 }

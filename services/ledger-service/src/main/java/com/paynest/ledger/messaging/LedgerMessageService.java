@@ -5,6 +5,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -102,5 +103,8 @@ public class LedgerMessageService {
 
     private void reply(PostTransfer command, Message event) {
         outbox.append(AGGREGATE, command.transferId(), Topics.LEDGER_EVENTS, event);
+        try (var ignored = MDC.putCloseable("transferId", command.transferId().toString())) {
+            log.info("Replied {}", EventCodec.typeOf(event));
+        }
     }
 }

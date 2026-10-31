@@ -17,6 +17,10 @@
     <dependencies>
         <dependency>
             <groupId>com.paynest</groupId>
+            <artifactId>observability</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.paynest</groupId>
             <artifactId>common-web</artifactId>
         </dependency>
         <dependency>

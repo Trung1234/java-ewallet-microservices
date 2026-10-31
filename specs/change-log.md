@@ -13,6 +13,11 @@ Entry format:
 
 ---
 
+## 2026-10-31 — Add AWS EC2 deployment and CloudWatch monitoring
+- Changed: `architect.md` gains the `observability` library, `TransferMetrics` and an AWS deployment section. `test-plan.md` gains the T-MET, T-LOG, T-OPS and T-AWS cases.
+- Why: `aws-setup.md` describes running the system on one EC2 instance with logs and metrics in CloudWatch. Local runs must stay as they are, so everything is behind the `aws` Spring profile and `infra/docker-compose.aws.yml`.
+- Impact: new module `libs/observability`, used by all seven services. Business metrics in transfer-service. `transferId` in the logs of the saga services. No API, schema or event change. The T-AWS cases are manual and need a real AWS account.
+
 ## 2026-10-31 — Add class diagrams from the source code
 - Changed: added `architect.md` with Mermaid class diagrams for every library and service, derived from the current code.
 - Why: there was no class-level view of the system; the README only covers services and flows.

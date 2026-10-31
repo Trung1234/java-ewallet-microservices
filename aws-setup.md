@@ -309,7 +309,7 @@ public class TransferMetrics {
 ### 5.6 Giới hạn bộ nhớ JVM trong container
 
 ```dockerfile
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY target/*.jar app.jar
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"

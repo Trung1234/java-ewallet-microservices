@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,17 +70,17 @@ public class WalletCommandService {
     private void hold(HoldFunds command) {
         Optional<Wallet> found = wallets.findById(command.walletId());
         if (found.isEmpty()) {
-            reply(command.walletId(), new FundsHoldFailed(command.transferId(), command.walletId(), "WALLET_NOT_FOUND"));
+            reply(command.transferId(), command.walletId(), new FundsHoldFailed(command.transferId(), command.walletId(), "WALLET_NOT_FOUND"));
             return;
         }
         Wallet wallet = found.get();
         if (wallet.available() < command.amount()) {
-            reply(wallet.getId(), new FundsHoldFailed(command.transferId(), wallet.getId(), "INSUFFICIENT_FUNDS"));
+            reply(command.transferId(), wallet.getId(), new FundsHoldFailed(command.transferId(), wallet.getId(), "INSUFFICIENT_FUNDS"));
             return;
         }
         wallet.hold(command.amount());
         transactions.save(WalletTransaction.of(wallet, TransactionType.HOLD, command.amount(), command.transferId()));
-        reply(wallet.getId(), new FundsHeld(command.transferId(), wallet.getId(), command.amount()));
+        reply(command.transferId(), wallet.getId(), new FundsHeld(command.transferId(), wallet.getId(), command.amount()));
     }
 
     /** Debit sender and credit recipient in one local transaction (both wallets live in this DB). */
@@ -90,7 +91,7 @@ public class WalletCommandService {
         to.credit(command.amount());
         transactions.save(WalletTransaction.of(from, TransactionType.TRANSFER_OUT, command.amount(), command.transferId()));
         transactions.save(WalletTransaction.of(to, TransactionType.TRANSFER_IN, command.amount(), command.transferId()));
-        reply(from.getId(), new FundsCaptured(command.transferId(), from.getId(), to.getId(), command.amount()));
+        reply(command.transferId(), from.getId(), new FundsCaptured(command.transferId(), from.getId(), to.getId(), command.amount()));
     }
 
     private void release(ReleaseFunds command) {
@@ -101,10 +102,13 @@ public class WalletCommandService {
             wallet.release(command.amount());
             transactions.save(WalletTransaction.of(wallet, TransactionType.RELEASE, command.amount(), command.transferId()));
         }
-        reply(wallet.getId(), new FundsReleased(command.transferId(), wallet.getId(), command.amount()));
+        reply(command.transferId(), wallet.getId(), new FundsReleased(command.transferId(), wallet.getId(), command.amount()));
     }
 
-    private void reply(UUID walletId, Message event) {
+    private void reply(UUID transferId, UUID walletId, Message event) {
         outbox.append(AGGREGATE, walletId, Topics.WALLET_EVENTS, event);
+        try (var ignored = MDC.putCloseable("transferId", transferId.toString())) {
+            log.info("Replied {}", EventCodec.typeOf(event));
+        }
     }
 }
